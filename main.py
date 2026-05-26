@@ -14,7 +14,8 @@ DATA_FILE = "data.json"
 user_states = {}
 
 default_data = {
-    "groups": {}
+    "groups": {},
+    "global_triggers": {}
 }
 
 if not os.path.exists(DATA_FILE):
@@ -23,6 +24,9 @@ if not os.path.exists(DATA_FILE):
 
 with open(DATA_FILE, "r", encoding="utf-8") as f:
     data = json.load(f)
+
+if "global_triggers" not in data:
+    data["global_triggers"] = {}
 
 def save_data():
     with open(DATA_FILE, "w", encoding="utf-8") as f:
@@ -39,7 +43,6 @@ def ensure_group(chat_id):
             "cooldown": 10,
             "enabled": True,
             "blacklist": [],
-            "triggers": {},
             "last_reply": 0
         }
 
@@ -78,8 +81,8 @@ async def settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
 COOLDOWN: {group['cooldown']} сек
 ВКЛЮЧЕН: {group['enabled']}
 
-ТРИГГЕРЫ:
-{list(group['triggers'].keys())}
+ГЛОБАЛЬНЫЕ ТРИГГЕРЫ:
+{list(data['global_triggers'].keys())}
 
 BLACKLIST:
 {group['blacklist']}
@@ -96,11 +99,7 @@ async def setchance(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         chance = int(context.args[0])
 
-        if chance < 0:
-            chance = 0
-
-        if chance > 100:
-            chance = 100
+        chance = max(0, min(100, chance))
 
         chat_id = str(update.effective_chat.id)
 
@@ -111,7 +110,7 @@ async def setchance(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_data()
 
         await update.message.reply_text(
-            f"новый шанс ответа: {chance}%"
+            f"шанс ответа: {chance}%"
         )
 
     except:
@@ -128,8 +127,7 @@ async def cooldown(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         cd = int(context.args[0])
 
-        if cd < 0:
-            cd = 0
+        cd = max(0, cd)
 
         chat_id = str(update.effective_chat.id)
 
@@ -242,9 +240,11 @@ async def addtrigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if update.effective_chat.type != "private":
+
         await update.message.reply_text(
-            "используй команду в лс бота"
+            "используй в лс бота"
         )
+
         return
 
     user_states[update.message.from_user.id] = {
@@ -252,7 +252,7 @@ async def addtrigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
 
     await update.message.reply_text(
-        "напиши слово/триггер"
+        "напиши триггер"
     )
 
 async def deltrigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -264,21 +264,21 @@ async def deltrigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         trigger = " ".join(context.args).lower()
 
-        removed = 0
+        if trigger in data["global_triggers"]:
 
-        for group_id in data["groups"]:
+            del data["global_triggers"][trigger]
 
-            if trigger in data["groups"][group_id]["triggers"]:
+            save_data()
 
-                del data["groups"][group_id]["triggers"][trigger]
+            await update.message.reply_text(
+                "триггер удалён"
+            )
 
-                removed += 1
+        else:
 
-        save_data()
-
-        await update.message.reply_text(
-            f"удалено из {removed} групп"
-        )
+            await update.message.reply_text(
+                "триггер не найден"
+            )
 
     except:
         await update.message.reply_text(
@@ -287,18 +287,16 @@ async def deltrigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def listtriggers(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    chat_id = str(update.effective_chat.id)
-
-    ensure_group(chat_id)
-
     triggers = list(
-        data["groups"][chat_id]["triggers"].keys()
+        data["global_triggers"].keys()
     )
 
     if not triggers:
+
         await update.message.reply_text(
             "триггеров нет"
         )
+
         return
 
     text = "\n".join(triggers)
@@ -312,11 +310,7 @@ async def message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = update.message.from_user.id
 
-    text = update.message.text
-
-    if not text:
-        text = ""
-
+    text = update.message.text or ""
     text = text.lower()
 
     if user_id in user_states:
@@ -338,15 +332,8 @@ async def message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             trigger = state["trigger"]
 
-            group_id = state.get("group_id")
-
-            if not group_id:
-                group_id = list(data["groups"].keys())[0]
-
-            ensure_group(group_id)
-
-            if trigger not in data["groups"][group_id]["triggers"]:
-                data["groups"][group_id]["triggers"][trigger] = []
+            if trigger not in data["global_triggers"]:
+                data["global_triggers"][trigger] = []
 
             response = None
 
@@ -394,17 +381,12 @@ async def message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             if response:
 
-                for group_id in data["groups"]:
-
-                    if trigger not in data["groups"][group_id]["triggers"]:
-                        data["groups"][group_id]["triggers"][trigger] = []
-
-                    data["groups"][group_id]["triggers"][trigger].append(response)
+                data["global_triggers"][trigger].append(response)
 
                 save_data()
 
                 await update.message.reply_text(
-                    "триггер сохранён"
+                    "триггер сохранён глобально"
                 )
 
             del user_states[user_id]
@@ -431,7 +413,7 @@ async def message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if current_time - group["last_reply"] < group["cooldown"]:
         return
 
-    for trigger in group["triggers"]:
+    for trigger in data["global_triggers"]:
 
         if trigger in text:
 
@@ -441,7 +423,7 @@ async def message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
             response = random.choice(
-                group["triggers"][trigger]
+                data["global_triggers"][trigger]
             )
 
             try:
@@ -482,8 +464,8 @@ async def message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         response["content"]
                     )
 
-            except:
-                pass
+            except Exception as e:
+                print(e)
 
             group["last_reply"] = current_time
 
