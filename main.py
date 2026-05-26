@@ -1,4 +1,3 @@
-```python
 from telegram.ext import *
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -512,4 +511,3 @@ app.add_handler(
 print("бот запущен")
 
 app.run_polling()
-```
