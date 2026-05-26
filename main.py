@@ -1,6 +1,10 @@
 from telegram.ext import *
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReactionTypeEmoji
-import json, os, random, time, re
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+import json
+import os
+import random
+import time
+import re
 
 TOKEN = "8635966932:AAFkbhq9n0o6elo0ml61-s3jQWg1jGCOUIs"
 OWNER_ID = 1235534514
@@ -8,12 +12,12 @@ OWNER_ID = 1235534514
 DATA_FILE = "data.json"
 user_states = {}
 
-# ---------------- INIT ----------------
-
 default_data = {
     "groups": {},
     "global_triggers": {}
 }
+
+# ---------------- LOAD ----------------
 
 if not os.path.exists(DATA_FILE):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
@@ -45,8 +49,6 @@ def ensure_group(chat_id):
         save_data()
 
 
-# ---------------- OWNER CHECK ----------------
-
 def is_owner(user_id):
     return user_id == OWNER_ID
 
@@ -63,40 +65,45 @@ def update_mode(group):
         group["mode"] = "normal"
 
 
-# ---------------- REACTIONS ----------------
+# ---------------- REACTIONS (PTB 21+) ----------------
 
-async def react(update, context):
+async def react(update: Update, context: ContextTypes.DEFAULT_TYPE):
     emojis = ["👍", "😂", "🔥", "💀", "🤡", "👀", "😈"]
 
     try:
         await context.bot.set_message_reaction(
             chat_id=update.effective_chat.id,
             message_id=update.message.message_id,
-            reaction=[ReactionTypeEmoji(emoji=random.choice(emojis))]
+            reaction=[random.choice(emojis)]
         )
-    except:
-        pass
+    except Exception as e:
+        print("reaction error:", e)
 
 
-# ---------------- GLOBAL COMMANDS (ANY USER) ----------------
+async def random_react(update, context, group):
+    if random.randint(1, 100) < group["reaction_chance"]:
+        await react(update, context)
+
+
+# ---------------- GLOBAL COMMANDS ----------------
 
 async def global_commands(update, context, group):
     text = (update.message.text or "").lower()
 
     if "заткнись" in text:
         set_mode(group, "mute", 600)
-        await update.message.reply_text("ок")
+        await update.message.reply_text("ok")
         return True
 
     if "отвечай минуту" in text:
         set_mode(group, "chaos", 60)
-        await update.message.reply_text("ок, работаю")
+        await update.message.reply_text("ok")
         return True
 
     return False
 
 
-# ---------------- MESSAGE ----------------
+# ---------------- MESSAGE CORE ----------------
 
 async def message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
@@ -120,7 +127,15 @@ async def message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id in group["blacklist"]:
         return
 
-    # global commands
+    # --- reply to bot hack (имитация "реакции на реакцию") ---
+    if update.message.reply_to_message:
+        if update.message.reply_to_message.from_user.id == context.bot.id:
+            if "😂" in text or "💀" in text or "🤡" in text:
+                await update.message.reply_text("сам ты смешной")
+                await react(update, context)
+                return
+
+    # --- global commands ---
     if await global_commands(update, context, group):
         return
 
@@ -162,33 +177,36 @@ async def message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             group["last_reply"] = now
             save_data()
+
             await react(update, context)
             return
 
-    # random reaction
-    if random.randint(1, 100) < group["reaction_chance"]:
-        await react(update, context)
+    # random reaction even without reply
+    await random_react(update, context, group)
 
 
-# ---------------- OWNER COMMANDS (ONLY DM) ----------------
+# ---------------- PANEL (OWNER ONLY) ----------------
 
-async def menu(update, context):
-    if not is_owner(update.message.from_user.id):
+async def panel(update, context):
+    if update.effective_chat.type != "private":
+        return
+    if update.message.from_user.id != OWNER_ID:
         return
 
     keyboard = [
-        [InlineKeyboardButton("шанс ответа", callback_data="chance")],
-        [InlineKeyboardButton("реакции", callback_data="react")],
-        [InlineKeyboardButton("cooldown", callback_data="cd")]
+        [InlineKeyboardButton("reply chance", callback_data="chance")],
+        [InlineKeyboardButton("reaction chance", callback_data="react")],
+        [InlineKeyboardButton("cooldown", callback_data="cd")],
+        [InlineKeyboardButton("mode", callback_data="mode")]
     ]
 
     await update.message.reply_text(
-        "панель",
+        "control panel",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
 
-async def menu_cb(update, context):
+async def panel_cb(update, context):
     q = update.callback_query
     await q.answer()
 
@@ -197,19 +215,25 @@ async def menu_cb(update, context):
     g = data["groups"][chat_id]
 
     if q.data == "chance":
-        await q.edit_message_text(f"reply: {g['reply_chance']}%")
+        await q.edit_message_text(f"reply chance: {g['reply_chance']}%")
 
     elif q.data == "react":
-        await q.edit_message_text(f"react: {g['reaction_chance']}%")
+        await q.edit_message_text(f"reaction chance: {g['reaction_chance']}%")
 
     elif q.data == "cd":
         await q.edit_message_text(f"cooldown: {g['cooldown']}")
 
+    elif q.data == "mode":
+        await q.edit_message_text(
+            f"mode: {g['mode']}\n"
+            f"time left: {int(max(0, g['mode_until'] - time.time()))} sec"
+        )
 
-# ---------------- OWNER SETTINGS ----------------
+
+# ---------------- OWNER COMMANDS ----------------
 
 async def setchance(update, context):
-    if not is_owner(update.message.from_user.id):
+    if update.message.from_user.id != OWNER_ID:
         return
 
     val = max(0, min(100, int(context.args[0])))
@@ -223,7 +247,7 @@ async def setchance(update, context):
 
 
 async def setreact(update, context):
-    if not is_owner(update.message.from_user.id):
+    if update.message.from_user.id != OWNER_ID:
         return
 
     val = max(0, min(100, int(context.args[0])))
@@ -237,7 +261,7 @@ async def setreact(update, context):
 
 
 async def cooldown(update, context):
-    if not is_owner(update.message.from_user.id):
+    if update.message.from_user.id != OWNER_ID:
         return
 
     val = max(0, int(context.args[0]))
@@ -250,39 +274,16 @@ async def cooldown(update, context):
     await update.message.reply_text(f"cooldown {val}")
 
 
-# ---------------- BASIC TRIGGERS (DEFAULT PACK) ----------------
-
-if "привет" not in data["global_triggers"]:
-    data["global_triggers"]["привет"] = [
-        {"type": "text", "content": "чё надо"},
-        {"type": "text", "content": "здрасьте"},
-    ]
-
-if "иди нахуй" not in data["global_triggers"]:
-    data["global_triggers"]["иди нахуй"] = [
-        {"type": "text", "content": "сам иди"},
-        {"type": "text", "content": "понял, уважаю агрессию"},
-    ]
-
-if "бот" not in data["global_triggers"]:
-    data["global_triggers"]["бот"] = [
-        {"type": "text", "content": "я тут"},
-        {"type": "text", "content": "не зови меня"},
-    ]
-
-save_data()
-
-
 # ---------------- APP ----------------
 
 app = ApplicationBuilder().token(TOKEN).build()
 
-app.add_handler(CommandHandler("menu", menu))
+app.add_handler(CommandHandler("panel", panel))
 app.add_handler(CommandHandler("setchance", setchance))
 app.add_handler(CommandHandler("setreact", setreact))
 app.add_handler(CommandHandler("cooldown", cooldown))
 
-app.add_handler(CallbackQueryHandler(menu_cb))
+app.add_handler(CallbackQueryHandler(panel_cb))
 app.add_handler(MessageHandler(filters.ALL, message))
 
 print("bot running")
