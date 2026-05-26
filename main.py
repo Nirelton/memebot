@@ -1,17 +1,14 @@
 from telegram.ext import *
-from telegram import Update
-from telegram.ext import ContextTypes
-import json
-import os
-import random
-import time
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReactionTypeEmoji
+import json, os, random, time, re
 
 TOKEN = "8635966932:AAFkbhq9n0o6elo0ml61-s3jQWg1jGCOUIs"
 OWNER_ID = 1235534514
 
 DATA_FILE = "data.json"
-
 user_states = {}
+
+# ---------------- INIT ----------------
 
 default_data = {
     "groups": {},
@@ -25,382 +22,97 @@ if not os.path.exists(DATA_FILE):
 with open(DATA_FILE, "r", encoding="utf-8") as f:
     data = json.load(f)
 
-if "global_triggers" not in data:
-    data["global_triggers"] = {}
 
 def save_data():
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-def ensure_group(chat_id):
 
+def ensure_group(chat_id):
     chat_id = str(chat_id)
 
     if chat_id not in data["groups"]:
-
         data["groups"][chat_id] = {
             "reply_chance": 35,
+            "reaction_chance": 50,
             "cooldown": 10,
             "enabled": True,
             "blacklist": [],
-            "last_reply": 0
+            "last_reply": 0,
+            "mode": "normal",
+            "mode_until": 0
         }
-
         save_data()
+
+
+# ---------------- OWNER CHECK ----------------
 
 def is_owner(user_id):
     return user_id == OWNER_ID
 
-async def is_group_admin(update, context):
 
-    user_id = update.message.from_user.id
-    chat_id = update.effective_chat.id
+# ---------------- MODES ----------------
 
-    if user_id == OWNER_ID:
+def set_mode(group, mode, seconds):
+    group["mode"] = mode
+    group["mode_until"] = time.time() + seconds
+
+
+def update_mode(group):
+    if group["mode"] != "normal" and time.time() > group["mode_until"]:
+        group["mode"] = "normal"
+
+
+# ---------------- REACTIONS ----------------
+
+async def react(update, context):
+    emojis = ["👍", "😂", "🔥", "💀", "🤡", "👀", "😈"]
+
+    try:
+        await context.bot.set_message_reaction(
+            chat_id=update.effective_chat.id,
+            message_id=update.message.message_id,
+            reaction=[ReactionTypeEmoji(emoji=random.choice(emojis))]
+        )
+    except:
+        pass
+
+
+# ---------------- GLOBAL COMMANDS (ANY USER) ----------------
+
+async def global_commands(update, context, group):
+    text = (update.message.text or "").lower()
+
+    if "заткнись" in text:
+        set_mode(group, "mute", 600)
+        await update.message.reply_text("ок")
         return True
 
-    admins = await context.bot.get_chat_administrators(chat_id)
-
-    for admin in admins:
-
-        if admin.user.id == user_id:
-            return True
+    if "отвечай минуту" in text:
+        set_mode(group, "chaos", 60)
+        await update.message.reply_text("ок, работаю")
+        return True
 
     return False
 
-async def settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    chat_id = str(update.effective_chat.id)
-
-    ensure_group(chat_id)
-
-    group = data["groups"][chat_id]
-
-    text = f"""
-ШАНС ОТВЕТА: {group['reply_chance']}%
-COOLDOWN: {group['cooldown']} сек
-ВКЛЮЧЕН: {group['enabled']}
-
-ГЛОБАЛЬНЫЕ ТРИГГЕРЫ:
-{list(data['global_triggers'].keys())}
-
-BLACKLIST:
-{group['blacklist']}
-"""
-
-    await update.message.reply_text(text)
-
-async def setchance(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    if not await is_group_admin(update, context):
-        return
-
-    try:
-
-        chance = int(context.args[0])
-
-        chance = max(0, min(100, chance))
-
-        chat_id = str(update.effective_chat.id)
-
-        ensure_group(chat_id)
-
-        data["groups"][chat_id]["reply_chance"] = chance
-
-        save_data()
-
-        await update.message.reply_text(
-            f"шанс ответа: {chance}%"
-        )
-
-    except:
-        await update.message.reply_text(
-            "/setchance 35"
-        )
-
-async def cooldown(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    if not await is_group_admin(update, context):
-        return
-
-    try:
-
-        cd = int(context.args[0])
-
-        cd = max(0, cd)
-
-        chat_id = str(update.effective_chat.id)
-
-        ensure_group(chat_id)
-
-        data["groups"][chat_id]["cooldown"] = cd
-
-        save_data()
-
-        await update.message.reply_text(
-            f"cooldown: {cd} сек"
-        )
-
-    except:
-        await update.message.reply_text(
-            "/cooldown 10"
-        )
-
-async def blacklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    if not await is_group_admin(update, context):
-        return
-
-    try:
-
-        user_id = int(context.args[0])
-
-        chat_id = str(update.effective_chat.id)
-
-        ensure_group(chat_id)
-
-        if user_id not in data["groups"][chat_id]["blacklist"]:
-            data["groups"][chat_id]["blacklist"].append(user_id)
-
-        save_data()
-
-        await update.message.reply_text(
-            "юзер в чс"
-        )
-
-    except:
-        await update.message.reply_text(
-            "/blacklist USER_ID"
-        )
-
-async def unblacklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    if not await is_group_admin(update, context):
-        return
-
-    try:
-
-        user_id = int(context.args[0])
-
-        chat_id = str(update.effective_chat.id)
-
-        ensure_group(chat_id)
-
-        if user_id in data["groups"][chat_id]["blacklist"]:
-            data["groups"][chat_id]["blacklist"].remove(user_id)
-
-        save_data()
-
-        await update.message.reply_text(
-            "юзер удалён из чс"
-        )
-
-    except:
-        await update.message.reply_text(
-            "/unblacklist USER_ID"
-        )
-
-async def on(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    if not await is_group_admin(update, context):
-        return
-
-    chat_id = str(update.effective_chat.id)
-
-    ensure_group(chat_id)
-
-    data["groups"][chat_id]["enabled"] = True
-
-    save_data()
-
-    await update.message.reply_text(
-        "бот включён"
-    )
-
-async def off(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    if not await is_group_admin(update, context):
-        return
-
-    chat_id = str(update.effective_chat.id)
-
-    ensure_group(chat_id)
-
-    data["groups"][chat_id]["enabled"] = False
-
-    save_data()
-
-    await update.message.reply_text(
-        "бот выключен"
-    )
-
-async def addtrigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    if not is_owner(update.message.from_user.id):
-        return
-
-    if update.effective_chat.type != "private":
-
-        await update.message.reply_text(
-            "используй в лс бота"
-        )
-
-        return
-
-    user_states[update.message.from_user.id] = {
-        "step": "waiting_trigger"
-    }
-
-    await update.message.reply_text(
-        "напиши триггер"
-    )
-
-async def deltrigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    if not is_owner(update.message.from_user.id):
-        return
-
-    try:
-
-        trigger = " ".join(context.args).lower()
-
-        if trigger in data["global_triggers"]:
-
-            del data["global_triggers"][trigger]
-
-            save_data()
-
-            await update.message.reply_text(
-                "триггер удалён"
-            )
-
-        else:
-
-            await update.message.reply_text(
-                "триггер не найден"
-            )
-
-    except:
-        await update.message.reply_text(
-            "/deltrigger слово"
-        )
-
-async def listtriggers(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    triggers = list(
-        data["global_triggers"].keys()
-    )
-
-    if not triggers:
-
-        await update.message.reply_text(
-            "триггеров нет"
-        )
-
-        return
-
-    text = "\n".join(triggers)
-
-    await update.message.reply_text(text)
+# ---------------- MESSAGE ----------------
 
 async def message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     if not update.message:
         return
-
-    user_id = update.message.from_user.id
-
-    text = update.message.text or ""
-    text = text.lower()
-
-    if user_id in user_states:
-
-        state = user_states[user_id]
-
-        if state["step"] == "waiting_trigger":
-
-            state["trigger"] = text
-            state["step"] = "waiting_response"
-
-            await update.message.reply_text(
-                "отправь ответ:\nтекст/стикер/фото/гиф/гс/кружок"
-            )
-
-            return
-
-        elif state["step"] == "waiting_response":
-
-            trigger = state["trigger"]
-
-            if trigger not in data["global_triggers"]:
-                data["global_triggers"][trigger] = []
-
-            response = None
-
-            if update.message.text:
-
-                response = {
-                    "type": "text",
-                    "content": update.message.text
-                }
-
-            elif update.message.sticker:
-
-                response = {
-                    "type": "sticker",
-                    "content": update.message.sticker.file_id
-                }
-
-            elif update.message.photo:
-
-                response = {
-                    "type": "photo",
-                    "content": update.message.photo[-1].file_id
-                }
-
-            elif update.message.animation:
-
-                response = {
-                    "type": "gif",
-                    "content": update.message.animation.file_id
-                }
-
-            elif update.message.voice:
-
-                response = {
-                    "type": "voice",
-                    "content": update.message.voice.file_id
-                }
-
-            elif update.message.video_note:
-
-                response = {
-                    "type": "circle",
-                    "content": update.message.video_note.file_id
-                }
-
-            if response:
-
-                data["global_triggers"][trigger].append(response)
-
-                save_data()
-
-                await update.message.reply_text(
-                    "триггер сохранён глобально"
-                )
-
-            del user_states[user_id]
-
-            return
 
     if update.effective_chat.type == "private":
         return
 
+    user_id = update.message.from_user.id
+    text = (update.message.text or "").lower()
+
     chat_id = str(update.effective_chat.id)
-
     ensure_group(chat_id)
-
     group = data["groups"][chat_id]
+
+    update_mode(group)
 
     if not group["enabled"]:
         return
@@ -408,88 +120,170 @@ async def message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id in group["blacklist"]:
         return
 
-    current_time = time.time()
-
-    if current_time - group["last_reply"] < group["cooldown"]:
+    # global commands
+    if await global_commands(update, context, group):
         return
 
-    for trigger in data["global_triggers"]:
+    if group["mode"] == "mute":
+        return
 
-        if trigger in text:
+    now = time.time()
+    chaos = group["mode"] == "chaos"
 
-            chance = random.randint(1, 100)
+    if not chaos and now - group["last_reply"] < group["cooldown"]:
+        return
 
-            if chance > group["reply_chance"]:
+    # ---------------- TRIGGERS ----------------
+
+    for trigger, responses in data["global_triggers"].items():
+
+        if re.search(rf"\b{re.escape(trigger)}\b", text):
+
+            chance = 95 if chaos else group["reply_chance"]
+
+            if random.randint(1, 100) > chance:
                 return
 
-            response = random.choice(
-                data["global_triggers"][trigger]
-            )
+            r = random.choice(responses)
 
             try:
+                if r["type"] == "text":
+                    await update.message.reply_text(r["content"])
+                elif r["type"] == "sticker":
+                    await update.message.reply_sticker(r["content"])
+                elif r["type"] == "photo":
+                    await update.message.reply_photo(r["content"])
+                elif r["type"] == "gif":
+                    await update.message.reply_animation(r["content"])
+                elif r["type"] == "voice":
+                    await update.message.reply_voice(r["content"])
+            except:
+                pass
 
-                if response["type"] == "text":
-
-                    await update.message.reply_text(
-                        response["content"]
-                    )
-
-                elif response["type"] == "sticker":
-
-                    await update.message.reply_sticker(
-                        response["content"]
-                    )
-
-                elif response["type"] == "photo":
-
-                    await update.message.reply_photo(
-                        response["content"]
-                    )
-
-                elif response["type"] == "gif":
-
-                    await update.message.reply_animation(
-                        response["content"]
-                    )
-
-                elif response["type"] == "voice":
-
-                    await update.message.reply_voice(
-                        response["content"]
-                    )
-
-                elif response["type"] == "circle":
-
-                    await update.message.reply_video_note(
-                        response["content"]
-                    )
-
-            except Exception as e:
-                print(e)
-
-            group["last_reply"] = current_time
-
+            group["last_reply"] = now
             save_data()
-
+            await react(update, context)
             return
+
+    # random reaction
+    if random.randint(1, 100) < group["reaction_chance"]:
+        await react(update, context)
+
+
+# ---------------- OWNER COMMANDS (ONLY DM) ----------------
+
+async def menu(update, context):
+    if not is_owner(update.message.from_user.id):
+        return
+
+    keyboard = [
+        [InlineKeyboardButton("шанс ответа", callback_data="chance")],
+        [InlineKeyboardButton("реакции", callback_data="react")],
+        [InlineKeyboardButton("cooldown", callback_data="cd")]
+    ]
+
+    await update.message.reply_text(
+        "панель",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+async def menu_cb(update, context):
+    q = update.callback_query
+    await q.answer()
+
+    chat_id = str(q.message.chat.id)
+    ensure_group(chat_id)
+    g = data["groups"][chat_id]
+
+    if q.data == "chance":
+        await q.edit_message_text(f"reply: {g['reply_chance']}%")
+
+    elif q.data == "react":
+        await q.edit_message_text(f"react: {g['reaction_chance']}%")
+
+    elif q.data == "cd":
+        await q.edit_message_text(f"cooldown: {g['cooldown']}")
+
+
+# ---------------- OWNER SETTINGS ----------------
+
+async def setchance(update, context):
+    if not is_owner(update.message.from_user.id):
+        return
+
+    val = max(0, min(100, int(context.args[0])))
+    chat_id = str(update.effective_chat.id)
+
+    ensure_group(chat_id)
+    data["groups"][chat_id]["reply_chance"] = val
+    save_data()
+
+    await update.message.reply_text(f"reply {val}%")
+
+
+async def setreact(update, context):
+    if not is_owner(update.message.from_user.id):
+        return
+
+    val = max(0, min(100, int(context.args[0])))
+    chat_id = str(update.effective_chat.id)
+
+    ensure_group(chat_id)
+    data["groups"][chat_id]["reaction_chance"] = val
+    save_data()
+
+    await update.message.reply_text(f"react {val}%")
+
+
+async def cooldown(update, context):
+    if not is_owner(update.message.from_user.id):
+        return
+
+    val = max(0, int(context.args[0]))
+    chat_id = str(update.effective_chat.id)
+
+    ensure_group(chat_id)
+    data["groups"][chat_id]["cooldown"] = val
+    save_data()
+
+    await update.message.reply_text(f"cooldown {val}")
+
+
+# ---------------- BASIC TRIGGERS (DEFAULT PACK) ----------------
+
+if "привет" not in data["global_triggers"]:
+    data["global_triggers"]["привет"] = [
+        {"type": "text", "content": "чё надо"},
+        {"type": "text", "content": "здрасьте"},
+    ]
+
+if "иди нахуй" not in data["global_triggers"]:
+    data["global_triggers"]["иди нахуй"] = [
+        {"type": "text", "content": "сам иди"},
+        {"type": "text", "content": "понял, уважаю агрессию"},
+    ]
+
+if "бот" not in data["global_triggers"]:
+    data["global_triggers"]["бот"] = [
+        {"type": "text", "content": "я тут"},
+        {"type": "text", "content": "не зови меня"},
+    ]
+
+save_data()
+
+
+# ---------------- APP ----------------
 
 app = ApplicationBuilder().token(TOKEN).build()
 
-app.add_handler(CommandHandler("settings", settings))
+app.add_handler(CommandHandler("menu", menu))
 app.add_handler(CommandHandler("setchance", setchance))
+app.add_handler(CommandHandler("setreact", setreact))
 app.add_handler(CommandHandler("cooldown", cooldown))
-app.add_handler(CommandHandler("blacklist", blacklist))
-app.add_handler(CommandHandler("unblacklist", unblacklist))
-app.add_handler(CommandHandler("on", on))
-app.add_handler(CommandHandler("off", off))
-app.add_handler(CommandHandler("addtrigger", addtrigger))
-app.add_handler(CommandHandler("deltrigger", deltrigger))
-app.add_handler(CommandHandler("listtriggers", listtriggers))
 
-app.add_handler(
-    MessageHandler(filters.ALL, message)
-)
+app.add_handler(CallbackQueryHandler(menu_cb))
+app.add_handler(MessageHandler(filters.ALL, message))
 
-print("бот запущен")
-
+print("bot running")
 app.run_polling()
