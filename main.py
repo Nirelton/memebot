@@ -3,7 +3,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 import json, os, random, time, re
 import asyncio
 
-TOKEN = "PUT_TOKEN_HERE"
+TOKEN = "8635966932:AAFkbhq9n0o6elo0ml61-s3jQWg1jGCOUIs"
 OWNER_ID = 1235534514
 
 DATA_FILE = "data.json"
